@@ -1,0 +1,268 @@
+
+# Ch.05 - any 다루기
+
+- 여타 타입핑이 가능한 언어들과 다르게 타입스크립트는 정적이거나 동적일 수 있음 ⇒ `any`
+  - 점진적인 마이그레이션
+  - 부분적인 타입체크
+
+> `**any`의 장점은 살리면서 단점을 줄이는 방법을 찾아보는 챕터\*\*
+
+### 아이템 38 any 타입은 가능한 한 좁은 범위에서만 사용하기
+
+- 타입 단언으로 범위 줄이기
+
+```tsx
+function f1() {
+  const x: any = expressionReturningFoo(); // Don't do this
+  processBar(x);
+}
+
+function f2() {
+  const x = expressionReturningFoo();
+  processBar(x as any); // Prefer this
+}
+
+function f3() {
+  const x = expressionReturningFoo();
+  // @ts-ignore
+  processBar(x);
+  return x;
+}
+```
+
+타입 구문의 경우에는 함수 전체에서 x가 `any`로 쓰이지만, 단언으로 `processBar`의 매개변수에만 적용되고 있다.
+
+심지어 x를 반환한다면 프로젝트 전반에서 any로 사용되게 된다
+
+`@ts-ignore`를 사용해 `any`를 사용하지 않고 타입 에러를 해결해야할 때 대체할 수 있다.
+
+```tsx
+const config: Config = {
+  a: 1,
+  b: 2,
+  c: {
+    key: value,
+  },
+} as any; // Don't do this!
+
+const config: Config = {
+  a: 1,
+  b: 2, // These properties are still checked
+  c: {
+    key: value as any,
+  },
+};
+```
+
+객체의 경우에도 any의 사용범위를 객체 전체가 아닌 프로퍼티 하나로만 제한할 수 있다.
+
+### 아이템 39 any를 구체적으로 변형해서 사용하기
+
+- 매개변수 `any` 구체화 하기
+
+  - 배열 `any[]`
+
+  ```tsx
+  function getLengthBad(array: any) {
+    // Don't do this!
+    return array.length;
+  }
+
+  function getLength(array: any[]) {
+    return array.length;
+  }
+  getLengthBad(/123/); // No error, returns undefined
+  getLength(/123/);
+  // ~~~~~ Argument of type 'RegExp' is not assignable
+  //       to parameter of type 'any[]'
+  ```
+
+  - 객체 `{[key: string]: any}` `object` `unknown`
+
+  ```tsx
+  function hasTwelveLetterKey(o: { [key: string]: any }) {
+    for (const key in o) {
+      if (key.length === 12) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function hasTwelveLetterKey(o: object) {
+    for (const key in o) {
+      if (key.length === 12) {
+        console.log(key, o[key]);
+        //  ~~~~~~ Element implicitly has an 'any' type
+        //         because type '{}' has no index signature
+        return true;
+      }
+    }
+    return false;
+  }
+  ```
+
+  |           | {[key: string]: any} | object | unknown |
+  | --------- | -------------------- | ------ | ------- |
+  | 키 열거   | O                    | O      | X       |
+  | 속성 접근 | O                    | X      | X       |
+
+- 함수 any 타입 구체화 하기 `() => any` `(arg:any) => any` `(...args: any[]) => any`
+  ```tsx
+  type Fn0 = () => any; // any function callable with no params
+  type Fn1 = (arg: any) => any; // With one param
+  type FnN = (...args: any[]) => any; // With any number of param === Function
+  ```
+
+### 아이템 40 함수 안으로 타입 단언문 감추기
+
+- 인풋(매개변수)과 아웃풋(리턴값)의 타입이 정확하다면 함수 중간의 구현부에 타입 단언을 써도 무방하다.
+  - 위에 나왔던 것처럼 리턴을 `any`로 한다면…? 😮
+- 불가피하게 `any`를 사용해야 한다면 전체에 적용하는 것이 아닌 함수 구현부의 일부분으로 **최대한 범위를 줄여서 사용하자**
+
+```tsx
+// 이 함수 타입만 맞다면 중간 구현부에 any가 들어가더라도 피해가 적다.
+declare function shallowEqual(a: any, b: any): boolean;
+function shallowObjectEqual<T extends object>(a: T, b: T): boolean {
+  for (const [k, aVal] of Object.entries(a)) {
+    if (!(k in b) || aVal !== b[k]) {
+                           // ~~~~ Element implicitly has an 'any' type
+                           //      because type '{}' has no index signature
+      return false;
+    }
+  }
+  return Object.keys(a).length === Object.keys(b).length;
+```
+
+### 아이템 41 any의 진화를 이해하기
+
+- `any` 타입과 `any[]` 은 배열 값추가, 조건문 분기 등으로 `any` 타입이 확장되며 진화될 수 있다. ( 다만 명시적 타입 구문을 사용하는 것이 더 안전한 타입을 유지하는 방법 )
+  - **다만 `noImplicitAny`가 적용되어 있지 않고 명시적으로 `any`를 적용했을 시 확장되지 않는다**
+  ```tsx
+  let val: any; // Type is any
+  if (Math.random() < 0.5) {
+    val = /hello/;
+    val; // Type is any
+  } else {
+    val = 12;
+    val; // Type is any
+  }
+  val; // Type is any
+  ```
+  - 배열 값추가
+  ```tsx
+  function range(start: number, limit: number) {
+    const out = []; // Type is any[]
+    for (let i = start; i < limit; i++) {
+      out.push(i); // Type of out is any[]
+    }
+    return out; // Type is number[]
+  }
+  ```
+
+### 아이템 42 모르는 타입의 값에는 any 대신 unknown을 사용하기
+
+- `any` 타입은 어떠한 타입이든 할당받거나 할당이 가능하다.
+- `unknown` 타입은 어떠한 타입이든 할당 받을수 있지만 할당은 `any`와 `unknown` 타입에만 가능하다.
+- `unknown` 타입 상태에서는 일반적으로 그대로 사용이 불가능하기 때문에 타입 좁히기를 유도할 수 있다.
+  - 타입 좁히기 방법
+    1. 타입 단언
+    2. `instanceof`
+    3. 사용자 정의 타입가드
+    4. 제네릭
+- `unknown` 보다 좁은 타입 `{}` 와 `object`
+  - `{}` 타입은 `null`과 `undefined`를 제외한 모든 값을 포함
+  - `object` 타입은 모든 비기본형 타입(참조형 타입)으로 이루어진다.
+
+### 아이템 43 몽키 패치보다는 안전한 타입을 사용하기
+
+- 몽키 패치 : **원래 소스코드를 변경하지 않고 실행 시 코드 기본 동작을 추가, 변경 또는 억제하는 기술 ⇒ 사용하지 말자!!**
+- 전역변수나 DOM 에 데이터를 추가하지말고 안전한 타입을 가진 새로운 객체를 만들어 사용하자
+- 반드시 내장 타입에 저장해야 하는경우 보강이나 사용자 정의 인터페이스로 단언하여 사용해야 한다.
+
+  - 보강
+
+  ```tsx
+  export {};
+  declare global {
+    interface Document {
+      /** Genus or species of monkey patch */
+      monkey: string;
+    }
+  }
+  document.monkey = "Tamarin"; // OK
+
+  export default {};
+  ```
+
+  - 사용자 정의 인터페이스 와 단언
+
+  ```tsx
+  interface MonkeyDocument extends Document {
+    /** Genus or species of monkey patch */
+    monkey: string;
+  }
+
+  (document as MonkeyDocument).monkey = "Macaque";
+
+  export default {};
+  ```
+
+### 아이템 44 타입 커버리지를 추적하여 타입 안전성 유지하기
+
+- `noImplicitAny` 를 설정하더라도 `any`로부터 안전하지 않음
+
+  - 명시적 `any`, `any[]`, `{[key : string] : any}`
+  - 서드파티 라이브러리의 `any`
+    ⇒ npm의 `type-coverage` 를 사용해 `any`를 추적하여 관리하자
+
+  ```bash
+  $npx type-converage
+  9985 / 10117 98.69%
+
+  $npx type-converage --detail
+  path/to/code.ts:1:10 getColumnInfo
+  path/to/module.ts:7:1 pt2
+  ```
+
+- 서드파티 라이브러리의 타입 선언이 잘못되어있거나 `any`로 되어있다면 직접 수정한 뒤 커뮤니티에 공개할 수도 있음.
+
+### 영훈 문제
+
+- `unknown` 타입이 `any` 타입보다 안전한 이유는?
+  - unknown은 any와 unknown외에 다른 타입**에는** 할당할 수 없다.
+- 타입 에러를 무시하고 싶을 때 사용하면 좋은 방법은?
+  - `// @ts-ignore`
+
+### 지영 문제
+
+Q1. 괄호안을 채워주세요.
+
+any 타입의 진화는 (A)가 설정된 상태에서 변수의 타입이 (B) any인 경우에만 일어납니다. 그러나 (C)으로 any를 선언하면 타입이 그대로 유지됩니다. 타입의 진화는 (D)을 할당하거나 배열에 요소를 넣은 후에만 일어납니다.
+
+→ (A)noImplicitAny, (B)암시적, (C) 명시적, (D) 값
+
+→ any가 진화되는 방식은 일반적인 변수가 추론되는 원리와 동일
+
+Q2. unknown과 never 차이를 설명해주세요.
+
+→
+
+unknown : 어떠한 타입이든 unknown에 할당가능, 어떠한 값이 있지만 그 타입을 알지 못하는 경우라면 unknown을 사용.
+
+never: 없는 값의 집합. 어떤 타입도 never에 할당할 수 없음.
+
+참고:[https://simsimjae.tistory.com/463](https://simsimjae.tistory.com/463)
+
+Q3. unknown 타입을 사용하기 위해서는 어떻게 해야할까요?
+
+→ unknown 타입을 그대로 사용할 수 없기 때문에 **타입 단언문, 사용자 정의 타입 가드, instanceof 연산자**를 이용해서 unknown 타입을 원하는 타입으로 변환해야 한다
+
+Q4. `object` 타입과 `{}` 의 차이점은?
+
+→ object 타입은 객체의 키를 열거할 수는 있지만 속성에 접근할 수 없다
+
+→ object 타입은 모든 비기본형 타입으로 이뤄짐.
+{}은 null과 undefined를 제외한 모든 값을 포함
+
+[https://velog.io/@njh7799/typescript-Object-vs-object-vs-](https://velog.io/@njh7799/typescript-Object-vs-object-vs-)
